@@ -167,7 +167,8 @@ class CMRESHandler(logging.Handler):
                     IndexNameFrequency.WEEKLY, IndexNameFrequency.MONTHLY, IndexNameFrequency.YEARLY). By default
                     it uses daily indices.
         :param es_doc_type: A string with the name of the document type that will be used ```python_log``` used
-                    by default
+                    by default.  If set to "None", will not set the document type, which may be required for
+                    elasticsearch >= 7.0
         :param es_additional_fields: A dictionary with all the additional fields that you would like to add
                     to the logs, such the application, environment, etc.
         :param raise_on_indexing_exceptions: A boolean, True only for debugging purposes to raise exceptions
@@ -289,17 +290,21 @@ class CMRESHandler(logging.Handler):
                 with self._buffer_lock:
                     logs_buffer = self._buffer
                     self._buffer = []
-                actions = (
-                    {
-                        '_index': self._index_name_func.__func__(self.es_index_name),
-                        '_type': self.es_doc_type,
-                        '_source': log_record
-                    }
-                    for log_record in logs_buffer
-                )
+
+                def actions():
+                    for log_record in logs_buffer:
+                        action = {
+                            '_index': self._index_name_func.__func__(self.es_index_name),
+                            '_source': log_record
+                        }
+                        if self.es_doc_type is not None:
+                            action["_type"] = self.es_doc_type
+
+                        yield action
+
                 eshelpers.bulk(
                     client=self.__get_es_client(),
-                    actions=actions,
+                    actions=actions(),
                     stats_only=True
                 )
             except Exception as exception:
